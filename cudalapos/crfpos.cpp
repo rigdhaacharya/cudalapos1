@@ -2,7 +2,6 @@
  * $Id$
  */
 
-#include <sys/time.h>
 #include <stdio.h>
 #include <fstream>
 #include <map>

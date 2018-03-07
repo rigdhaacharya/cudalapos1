@@ -107,7 +107,7 @@ double CRF_Model::lookahead_search(const Sequence & seq,
       m = score;
       best_seq.clear();
       best_seq.push_back(i);
-      copy(tmp_seq.begin(), tmp_seq.end(), back_inserter(best_seq));
+     // copy(tmp_seq.begin(), tmp_seq.end(), back_inserter(best_seq));
     }
   }
 

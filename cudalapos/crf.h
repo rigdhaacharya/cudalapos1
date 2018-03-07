@@ -19,7 +19,7 @@
 #define USE_HASH_MAP  // if you encounter errors with hash, try commenting out this line. (the program will be a bit slower, though)
 #ifdef USE_HASH_MAP
 //#include <ext/hash_map>
-#include <tr1/unordered_map>
+#include <unordered_map>
 #endif
 
 

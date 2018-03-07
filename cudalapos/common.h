@@ -17,6 +17,7 @@ struct Token
   std::string prd;
   int begin;
   int end;
+  Token();
   Token(std::string s, std::string p) : str(s), pos(p) {}
   Token(std::string s, const int b, const int e) : str(s), begin(b), end(e) {}
 };
