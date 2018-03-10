@@ -11,7 +11,10 @@
 #include "device_launch_parameters.h"
 #include "cuda.h"
 #include <stdio.h>
-
+#include <thrust/device_vector.h>
+#include <thrust/sort.h>
+#include <thrust/reduce.h>
+#include <thrust/iterator/constant_iterator.h>
  //#include "lbfgs.h"
 
 using namespace std;
@@ -32,25 +35,70 @@ extern int push_stop_watch();
 static CRF_Model * pointer_to_working_object = NULL; // this is not a good solution...
 
 													 // CUDA kernel. Each thread takes care of one element
-__global__ void sayHello(char** lineArray)
-{
-	// Get our global thread ID, note we're using both
-	// threads and blocks so we can't simply look for the 
-	// thread or block Id
-	/*int id = blockIdx.x*blockDim.x + threadIdx.x;
-	char* line = lineArray[id];
-	 char t1 = line.find_first_of('\t');
-	char t2 = line.find_last_of('\t');
-	char* classname = line.substr(0, t1);
-	char* featurename = line.substr(t1 + 1, t2 - (t1 + 1) );
-	float lambda;
-	char w = line.substr(t2+1);
-	sscanf(w.c_str(), "%f", &lambda);*/
 
-	/*const int label = CRF_Model:: _label_bag.Put(classname);
-	const int feature = CRF_Model::_featurename_bag.Put(featurename);
-	CRF_Model::_fb.Put(CRF_Model::ME_Feature(label, feature));
-	CRF_Model::_vl.push_back(lambda);*/
+
+__global__ void sayHello(char* lineArray, char* className, char* featureName, char* weight)
+{
+	int blk = blockIdx.x;
+	int thread = threadIdx.x;
+	int lineNum = blk * 2 + thread;
+	int pos = 1024 * lineNum;
+	
+
+	int classNamei = 0, featureNamei = 0, weighti = 0;
+	char lastChar = 'a';
+	char classnamec[10];
+	char featurenamec[100];
+	bool foundClass = false;
+	bool foundFeature = false;
+	bool foundWeight = false;
+	while (!foundClass || !foundFeature || !foundWeight) {
+		lastChar = lineArray[pos];
+		//printf("%c", lastChar);
+		if (!foundClass) {
+			if (lastChar != '\t') {
+				className[lineNum*10+classNamei] = lineArray[pos];
+				classNamei++;
+			}
+			else
+			{
+				className[lineNum * 10 + classNamei] = '\0';
+				foundClass = true;
+				classNamei++;
+			}
+		}
+		else if (!foundFeature) {
+			if (lastChar != '\t') {
+				featureName[lineNum * 10 +featureNamei] = lineArray[pos];
+				featureNamei++;
+			}
+			else
+			{
+				printf("found feature!!");
+				featureName[lineNum * 10 + featureNamei] = '\0';
+				foundFeature = true;
+				featureNamei++;
+			}
+		}
+		else if (!foundWeight) {
+			printf("havne't found weight yet");
+			if (lastChar != '\n') {
+				weight[lineNum * 10 + weighti] = lineArray[pos];
+				weighti++;
+			}
+			if(weighti==8)
+			{
+				printf("found weight!!");
+				weight[lineNum * 10 + weighti+1] = '\0';
+				foundWeight = true;				
+			}
+		}
+		pos++;
+	}
+	printf("weight %c %c %c", weight[0], weight[1], weight[2]);
+//	weight[lineNum] = atof(weightc);
+	printf("className %c %c %c", className[0], className[1], className[2]);
+	
 }
 
 CRF_Model::CRF_Model()
@@ -873,13 +921,14 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 	_label_bag.Clear();
 	_featurename_bag.Clear();
 	_fb.Clear();
-	char buf[1024];
-	int n = 771882;
-	char* lineArr[771882];
+	const int maxBufSize = 1024;
+	char buf[maxBufSize];
+	const int n = 4;
+	char lineArr[n*maxBufSize];
 	int i = 0;
 	string works;
 	string doesntwork, doesntworkfeature, doesntworkweight;
-	while (fgets(buf, 1024, fp)) {
+	/*while (fgets(buf, 1024, fp)) {
 		string line(buf);
 		string::size_type t1 = line.find_first_of('\t');
 		string::size_type t2 = line.find_last_of('\t');
@@ -896,75 +945,52 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 		doesntwork += classname + '\n';
 		doesntworkfeature += featurename + '\n';
 		doesntworkweight += w + '\n';
-	}
-	/*while (fgets(buf, 1024, fp)) {
-		int classNamei = 0, featureNamei = 0, weighti = 0;
-		char lastChar = 'a';
-		char classnamec[10];
-		char weightc[50];
-		char featurenamec[100];
-		bool foundClass = false;
-		bool foundFeature = false;
-		bool foundWeight = false;
-		int j = 0;
-		while (lastChar != '\0') {
-			lastChar = buf[j];
-			if (!foundClass) {
-				if (lastChar != '\t') {
-					classnamec[classNamei] = buf[j];
-					classNamei++;
-				}
-				else
-				{
-					classnamec[classNamei] = '\0';
-					foundClass = true;
-					classNamei++;
-				}
-			}
-			else if (!foundFeature) {
-				if (lastChar != '\t') {
-					featurenamec[featureNamei] = buf[j];
-					featureNamei++;
-				}
-				else
-				{
-					featurenamec[featureNamei] = '\0';
-					foundFeature = true;
-					featureNamei++;
-				}
-			}
-			else if (!foundWeight) {
-				if (lastChar != '\n') {
-					weightc[weighti] = buf[j];
-					weighti++;
-				}
-				else
-				{
-					weightc[weighti] = '\0';
-					foundWeight = true;
-					weighti++;
-				}
-			}
-			j++;
-		}
-
-		lineArr[i] = buf;
-
-		float lambda = atof(weightc);
-		
-		const int label = _label_bag.Put(string(classnamec));
-		const int feature = _featurename_bag.Put(string(featurenamec));
-		_fb.Put(ME_Feature(label, feature));
-		_vl.push_back(lambda);
-		i++;
 	}*/
+	int pos = 0;
+	while (fgets(buf, 1024, fp)) {
+		pos = i * 1024;
+		int j = 0;
+		while (buf[j] != '\n') {
+			lineArr[pos] = buf[j];
+			j++;
+			pos++;
+		}
+		i++;
+		
+	}
+	
+
+	
+	char *device_lineArr;
+	char *device_weight;
+	char *device_className;
+	char *device_featureName;
+	int bytes = n*maxBufSize * sizeof(char);
+	cudaMalloc(&device_lineArr, bytes);
+	cudaMalloc(&device_weight, sizeof(char)*n*10);
+	cudaMalloc(&device_className, n*sizeof(char)*10);
+	cudaMalloc(&device_featureName, n * sizeof(char) * 100);
+
+	// Copy host vectors to device
+	cudaMemcpy(device_lineArr, lineArr, bytes, cudaMemcpyHostToDevice);
+	sayHello<<<2,2>>>(device_lineArr, device_className, device_featureName, device_weight);
+
+	//float * weights = (float*)malloc(n*sizeof(float));
+	char * weightc = (char*)malloc(n * 10 * sizeof(char));
+	char * className = (char*)malloc(n *10* sizeof(char));
+	char * featureName = (char*)malloc(n *100* sizeof(char));
 
 
+	cudaMemcpy(weightc, device_weight, n * sizeof(char) * 10, cudaMemcpyDeviceToHost);
+	cudaMemcpy(className, device_className, n * sizeof(char) * 10, cudaMemcpyDeviceToHost);
+	cudaMemcpy(featureName, device_featureName, n * sizeof(char) * 100, cudaMemcpyDeviceToHost);
 
+
+//	cudaMalloc(&device_featureName, bytes);
 	// }
 
 	 // for zero-wight edges
-	_label_bag.Put(BOS_LABEL);
+	/*_label_bag.Put(BOS_LABEL);
 	_label_bag.Put(EOS_LABEL);
 	for (int i = 0; i < _label_bag.Size(); i++) {
 		for (int j = 0; j < _label_bag.Size(); j++) {
@@ -1021,7 +1047,7 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 
 	if (verbose) {
 		cerr << "...done" << endl;
-	}
+	}*/
 
 	return true;
 }

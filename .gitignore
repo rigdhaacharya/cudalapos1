@@ -288,3 +288,5 @@ __pycache__/
 *.xsd.cs
 /cudalapos/cudalapos.vcxproj
 /cudalapos/cudalapos.sln
+/cudalapos/model_wsj02-21/model.la
+/cudalapos/model_wsj02-21/model.la
