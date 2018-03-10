@@ -1,0 +1,9 @@
+The/PRP involvement/VBN of/NNS ion/CD channels/VBG in/DT B/NNP and/NN T/WDT lymphocyte/DT activation/IN is/CC supported/CD by/IN many/JJ reports/VBZ of/NNS changes/VBZ in/RBR ion/CD fluxes/NNPS and/RB membrane/DT potential/JJ after/IN mitogen/DT binding/VBG ./PRP
+Human/NNP T/$ and/VBD B/NNP lymphocytes/$ demonstrate/VBP an/NN early/JJ and/RB transient/JJ hyperpolarization/JJ after/VBD ligand/JJR binding/VBG ./PRP
+Inasmuch/RB as/$ the/DT change/VBP in/VBN membrane/RBS potential/JJ is/VBZ dependent/NN on/IN elevation/JJ of/NNS free/RBS cytosolic/RP calcium/NN ,/, the/RB hyperpolarization/IN is/CC presumably/RB through/RB opening/NN of/NN Ca/CD (/RBR 2+/NNP )/PDT -stimulated/VBD K+/NNS channels/RBS ./RP
+We/JJS have/VBN used/VBD charybdotoxin/NNS ,/RBS a/RP known/JJ inhibitor/VB of/NNS Ca/RBS (/RP 2+/NN )/VB -dependent/NN K+/VB channels/VBZ ,/, to/IN study/NN the/NNPS role/JJR of/NNS these/CD channels/VBG in/VBP lymphocyte/CD activation/RB and/RB mitogenesis/PRP ./PRP
+We/$ demonstrate/VBP that/NN charybdotoxin/NN inhibits/VB the/DT ligand-induced/VBD transient/JJ membrane/MD hyperpolarization/JJ in/VBN B/NNP and/NN T/RB cells/VBZ in/IN a/EX dose-dependent/NN fashion/IN ,/CC without/IN affecting/VBG changes/VBZ in/NN cytosolic/RB Ca2+/PRP$ ./PRP
+However/RB ,/VBZ blockade/JJ of/NNPS the/NNP Ca/VBD (/NNS 2+/RBS )/RP -activated/CD K+/VB channel/NN is/RB not/RB associated/VBN with/RP changes/VBZ in/NN cell-cycle/RB gene/VBN activation/IN ,/CC IL-2/RB production/JJ ,/WP$ IL-2R/VBD expression/NN or/FW B/NNP and/NN T/WDT cell/DT mitogenesis/NN ./.
+These/DT results/VBZ imply/JJ that/NN membrane/JJ potential/JJ changes/VBZ secondary/JJ to/IN the/VBP ligand-dependent/NN opening/NN of/NN Ca/CD (/RBR 2+/NNP )/PDT -activated/NN K+/NNP channels/VBZ are/VBZ not/RB involved/VBN in/JJ B/NNP and/NN T/WDT lymphocyte/DT activation/RB and/RB mitogenesis/PRP ./PRP
+
+

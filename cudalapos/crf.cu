@@ -877,7 +877,27 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 	int n = 771882;
 	char* lineArr[771882];
 	int i = 0;
+	string works;
+	string doesntwork, doesntworkfeature, doesntworkweight;
 	while (fgets(buf, 1024, fp)) {
+		string line(buf);
+		string::size_type t1 = line.find_first_of('\t');
+		string::size_type t2 = line.find_last_of('\t');
+		string classname = line.substr(0, t1);
+		string featurename = line.substr(t1 + 1, t2 - (t1 + 1));
+		float lambda;
+		string w = line.substr(t2 + 1);
+		sscanf(w.c_str(), "%f", &lambda);
+
+		const int label = _label_bag.Put(classname);
+		const int feature = _featurename_bag.Put(featurename);
+		_fb.Put(ME_Feature(label, feature));
+		_vl.push_back(lambda);
+		doesntwork += classname + '\n';
+		doesntworkfeature += featurename + '\n';
+		doesntworkweight += w + '\n';
+	}
+	/*while (fgets(buf, 1024, fp)) {
 		int classNamei = 0, featureNamei = 0, weighti = 0;
 		char lastChar = 'a';
 		char classnamec[10];
@@ -932,13 +952,12 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 
 		float lambda = atof(weightc);
 		
-
-		const int label = _label_bag.Put(classnamec);
-		const int feature = _featurename_bag.Put(featurenamec);
+		const int label = _label_bag.Put(string(classnamec));
+		const int feature = _featurename_bag.Put(string(featurenamec));
 		_fb.Put(ME_Feature(label, feature));
 		_vl.push_back(lambda);
 		i++;
-	}
+	}*/
 
 
 

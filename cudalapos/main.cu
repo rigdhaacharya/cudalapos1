@@ -30,7 +30,7 @@ string MODEL_DIR = "."; // the default directory for saving the models
 const double PROB_OUTPUT_THRESHOLD = 0.001; // suppress output of tags with a very low probability
 
 void
-tokenize(const string & s, vector<Token> vt, const bool use_upenn_tokenizer);
+tokenize(const string & s, vector<Token> &vt, const bool use_upenn_tokenizer);
 
 void
 crf_decode_lookahead(Sentence & s, CRF_Model & m, vector< map<string, double> > & tagp);
