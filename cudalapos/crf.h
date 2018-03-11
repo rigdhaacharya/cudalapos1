@@ -299,7 +299,6 @@ private:
   void initialize_state_weights(const Sequence & seq);
   //  void lookahead_initialize_edge_weights();
   void lookahead_initialize_state_weights(const Sequence & seq);
-  int make_feature_bag(const int cutoff);
   //  int classify(const Sample & nbs, std::vector<double> & membp) const;
   double update_model_expectation();
   double add_sample_model_expectation(const Sequence & seq, std::vector<double>& vme, int & ncorrect);
@@ -338,7 +337,7 @@ private:
   int lookaheadtrain_sentence(const Sequence & seq, int & t, std::vector<double> & wa);
   int decode_lookahead_sentence(const Sequence & seq, std::vector<int> & vs);
 
-  void init_feature2mef();
+  void init_feature2mef(char*, char*);
   double calc_loglikelihood(const Sequence & seq);
   //  std::vector<double> calc_state_weight(const Sequence & seq, const int i) const;
   std::vector<double> calc_state_weight(const int i) const;

@@ -50,7 +50,8 @@ void CRF_Model::lookahead_initialize_state_weights(const Sequence & seq)
 double CRF_Model::lookahead_search(const Sequence & seq, 
 				   vector<int> & history,
 				   const int start,
-				   const int max_depth,  const int depth, 
+				   const int max_depth,   
+				   int depth, 
 				   double current_score,
 				   vector<int> & best_seq, 
 				   const bool follow_gold, 
@@ -58,60 +59,48 @@ double CRF_Model::lookahead_search(const Sequence & seq,
 {
   assert(history[HV_OFFSET + start - 1 + depth] >= 0);
   assert(history[HV_OFFSET + start - 1] >= 0);
-
-  if (current_score > 0.001 * DBL_MAX || current_score < -0.001 * DBL_MAX) {
-    cerr << "error: overflow in lookahead_search()" << endl; exit(1);
-  }
-
-  //  if (forbidden_seq && depth > 0) {
-  if (forbidden_seq && depth == 1) {
-    if ( (*forbidden_seq)[depth - 1] != history[HV_OFFSET + start + depth - 1])
-      forbidden_seq = NULL;
-  }
-
-  // terminal (leaf) node
-  if (depth >= max_depth || start + depth >= (int)seq.vs.size()) {
-    best_seq.clear();
-    if (forbidden_seq) return current_score;
-    else               return current_score + PERCEPTRON_MARGIN;
-  }
-
   double m = -DBL_MAX;
+  double new_score = current_score;
+  //for loop goes in GPU
+  //GPU inputs
+  //  int *p_edge_feature_id;
+  //_vl
+  //_history
+  //seq.vs.size
+  //p_state_weight
+  //pass back array of weight at index i
+
+  //int *p_edge_feature_id =cudaMalloc(&device_lineArr, bytes);
+
+
+
   for (int i = 0; i < _num_classes; i++) {
-    if (follow_gold && i != seq.vs[start + depth].label) continue;
+	  depth = 0;
+  while (depth < max_depth && (start + depth < (int)seq.vs.size())) {	 
 
-    double new_score = current_score;
-    // edge unigram features (state bigrams)
-    new_score += _vl[edge_feature_id(history[HV_OFFSET + start + depth -  1], i)];
+		  // edge unigram features (state bigrams)
+		  new_score += _vl[edge_feature_id(history[HV_OFFSET + start + depth - 1], i)];
 
-    // edge bigram features (state trigrams)
-    if (depth + start > 0)
-      new_score += _vl[edge_feature_id2(history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], i)];
+		  // edge bigram features (state trigrams)
+		  if (depth + start > 0)
+			  new_score += _vl[edge_feature_id2(history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], i)];
 
-    // edge trigram features (state 4-grams)
-    if (USE_EDGE_TRIGRAMS) {
-      if (depth + start > 1)
-	new_score += _vl[edge_feature_id3(history[HV_OFFSET + start + depth - 3], history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], i)];
-    }
+		  // state + observation features
+		  new_score += state_weight(start + depth, i);
 
-    // state + observation features
-    new_score += state_weight(start + depth, i);
-
-    history[HV_OFFSET + start + depth] = i;
-
-    vector<int> tmp_seq;
-    const double score = lookahead_search(seq, history, start, max_depth, depth + 1, new_score, tmp_seq, false, forbidden_seq);
-    //    const double score = lookahead_search(seq, history, start, max_depth, depth + 1, new_score, tmp_seq, follow_gold, forbidden_seq);
-    if (score > m) {
-      m = score;
-      best_seq.clear();
-      best_seq.push_back(i);
-     // copy(tmp_seq.begin(), tmp_seq.end(), back_inserter(best_seq));
-    }
+		  history[HV_OFFSET + start + depth] = i;
+		  if (new_score > m) {
+			  m = new_score;
+			  best_seq.clear();
+			  best_seq.push_back(i);
+		  }
+		  depth = depth + 1;
+	  }
+  }
+  return m;
   }
 
-  return m;
-}
+
 
 void CRF_Model::calc_diff(const double val,
 			  const Sequence & seq, 

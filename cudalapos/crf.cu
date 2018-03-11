@@ -21,6 +21,7 @@ using namespace std;
 
 extern bool USE_EDGE_TRIGRAMS;
 const int tileNum = 32;
+const int n = 1024;
 
 
 const string BOS_LABEL = "!BOS!";
@@ -555,41 +556,6 @@ double CRF_Model::calc_loglikelihood(const Sequence & seq)
 }
 
 
-int
-CRF_Model::make_feature_bag(const int cutoff)
-{
-#ifdef USE_HASH_MAP
-	//  typedef __gnu_cxx::hash_map<mefeature_type, int> map_type;
-	typedef std::tr1::unordered_map<mefeature_type, int> map_type;
-#else    
-	typedef std::map<mefeature_type, int> map_type;
-#endif
-
-	map_type count;
-	if (cutoff > 0) {
-		for (vector<Sequence>::const_iterator k = _vs.begin(); k != _vs.end(); k++) {
-			for (vector<Sample>::const_iterator i = k->vs.begin(); i != k->vs.end(); i++) {
-				for (vector<int>::const_iterator j = i->positive_features.begin(); j != i->positive_features.end(); j++) {
-					count[ME_Feature(i->label, *j).body()]++;
-				}
-			}
-		}
-	}
-
-	for (vector<Sequence>::const_iterator k = _vs.begin(); k != _vs.end(); k++) {
-		for (vector<Sample>::const_iterator i = k->vs.begin(); i != k->vs.end(); i++) {
-			for (vector<int>::const_iterator j = i->positive_features.begin(); j != i->positive_features.end(); j++) {
-				const ME_Feature feature(i->label, *j);
-				if (cutoff > 0 && count[feature.body()] <= cutoff) continue;
-				_fb.Put(feature);
-			}
-		}
-	}
-
-	init_feature2mef();
-
-	return 0;
-}
 
 double
 CRF_Model::heldout_likelihood()
@@ -843,7 +809,7 @@ CRF_Model::train(const OptimizationMethod method, const int cutoff,
 	if (widthfactor > 0)
 		cerr << "widthfactor = " << widthfactor << endl;
 	cerr << "preparing for estimation...";
-	make_feature_bag(cutoff);
+//	make_feature_bag(cutoff);
 	//  _vs.clear();
 	cerr << "done" << endl;
 	cerr << "number of state types = " << _num_classes << endl;
@@ -931,24 +897,6 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 	
 	string works;
 	string doesntwork, doesntworkfeature, doesntworkweight;
-	/*while (fgets(buf, 1024, fp)) {
-		string line(buf);
-		string::size_type t1 = line.find_first_of('\t');
-		string::size_type t2 = line.find_last_of('\t');
-		string classname = line.substr(0, t1);
-		string featurename = line.substr(t1 + 1, t2 - (t1 + 1));
-		float lambda;
-		string w = line.substr(t2 + 1);
-		sscanf(w.c_str(), "%f", &lambda);
-
-		const int label = _label_bag.Put(classname);
-		const int feature = _featurename_bag.Put(featurename);
-		_fb.Put(ME_Feature(label, feature));
-		_vl.push_back(lambda);
-		doesntwork += classname + '\n';
-		doesntworkfeature += featurename + '\n';
-		doesntworkweight += w + '\n';
-	}*/
 	int pos = 0;
 	int i = 0;
 	while (fgets(buf, 1024, fp)) {
@@ -1023,6 +971,8 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 	//  for zero-wight edges
 	_label_bag.Put(BOS_LABEL);
 	_label_bag.Put(EOS_LABEL);
+
+
 	for (int i = 0; i < _label_bag.Size(); i++) {
 		for (int j = 0; j < _label_bag.Size(); j++) {
 			const string & label1 = _label_bag.Str(j);
@@ -1071,7 +1021,7 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 
 	_num_classes = _label_bag.Size() - 2;
 
-	init_feature2mef();
+	init_feature2mef(className, featureName);
 	initialize_edge_weights();
 
 	fclose(fp);
@@ -1084,7 +1034,7 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 }
 
 void
-CRF_Model::init_feature2mef()
+CRF_Model::init_feature2mef(char* className, char* featureName)
 {
 	_feature2mef.clear();
 	for (int i = 0; i < _featurename_bag.Size(); i++) {
@@ -1096,17 +1046,14 @@ CRF_Model::init_feature2mef()
 		_feature2mef.push_back(vi);
 	}
 
+
+	//combine loop
 	for (int i = 0; i < _label_bag.Size(); i++) {
 		for (int j = 0; j < _label_bag.Size(); j++) {
 			const string & label1 = _label_bag.Str(j);
 			const int l1 = _featurename_bag.Put("->\t" + label1);
 			const int id = _fb.Put(ME_Feature(i, l1));
 			edge_feature_id(i, j) = id;
-		}
-	}
-
-	for (int i = 0; i < _label_bag.Size(); i++) {
-		for (int j = 0; j < _label_bag.Size(); j++) {
 			for (int k = 0; k < _label_bag.Size(); k++) {
 				const string & label1 = _label_bag.Str(j);
 				const string & label2 = _label_bag.Str(k);
@@ -1116,6 +1063,18 @@ CRF_Model::init_feature2mef()
 			}
 		}
 	}
+
+	//for (int i = 0; i < _label_bag.Size(); i++) {
+	//	for (int j = 0; j < _label_bag.Size(); j++) {
+	//		for (int k = 0; k < _label_bag.Size(); k++) {
+	//			const string & label1 = _label_bag.Str(j);
+	//			const string & label2 = _label_bag.Str(k);
+	//			const int l1 = _featurename_bag.Put("->\t" + label1 + "\t->\t" + label2);
+	//			const int id = _fb.Put(ME_Feature(i, l1));
+	//			edge_feature_id2(i, j, k) = id;
+	//		}
+	//	}
+	//}
 	if (USE_EDGE_TRIGRAMS) {
 		for (int i = 0; i < _label_bag.Size(); i++) {
 			for (int j = 0; j < _label_bag.Size(); j++) {

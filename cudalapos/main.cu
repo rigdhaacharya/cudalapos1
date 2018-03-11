@@ -102,10 +102,6 @@ struct TagProb
 
 int main(int argc, char** argv)
 {
-	int major = THRUST_MAJOR_VERSION;
-	int minor = THRUST_MINOR_VERSION;
-
-	std::cout << "Thrust v" << major << "." << minor << std::endl;
 
 	MODEL_DIR = "C:\\Users\\v-riach\\Downloads\\lapos\\model_wsj02-21";
 	string WORDNET_DIR = "";
