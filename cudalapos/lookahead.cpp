@@ -10,7 +10,6 @@
 #include <map>
 
 using namespace std;
-
 bool USE_EDGE_TRIGRAMS = false;
 
 const static int PERCEPTRON_NITER = 7;

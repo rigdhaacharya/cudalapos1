@@ -20,6 +20,8 @@
 using namespace std;
 
 extern bool USE_EDGE_TRIGRAMS;
+const int tileNum = 4;
+
 
 const string BOS_LABEL = "!BOS!";
 const string EOS_LABEL = "!EOS!";
@@ -41,7 +43,8 @@ __global__ void sayHello(char* lineArray, char* className, char* featureName, ch
 {
 	int blk = blockIdx.x;
 	int thread = threadIdx.x;
-	int lineNum = blk * 2 + thread;
+	int lineNum = blk * tileNum + thread;
+	printf("lineNum %d", lineNum);
 	int pos = 1024 * lineNum;
 	
 
@@ -69,35 +72,35 @@ __global__ void sayHello(char* lineArray, char* className, char* featureName, ch
 		}
 		else if (!foundFeature) {
 			if (lastChar != '\t') {
-				featureName[lineNum * 10 +featureNamei] = lineArray[pos];
+				featureName[lineNum * 100 +featureNamei] = lineArray[pos];
 				featureNamei++;
 			}
 			else
 			{
-				printf("found feature!!");
-				featureName[lineNum * 10 + featureNamei] = '\0';
+				//printf("found feature!!");
+				featureName[lineNum * 100 + featureNamei] = '\0';
 				foundFeature = true;
 				featureNamei++;
 			}
 		}
 		else if (!foundWeight) {
-			printf("havne't found weight yet");
+			//printf("havne't found weight yet");
 			if (lastChar != '\n') {
 				weight[lineNum * 10 + weighti] = lineArray[pos];
 				weighti++;
 			}
 			if(weighti==8)
 			{
-				printf("found weight!!");
+				//printf("found weight!!");
 				weight[lineNum * 10 + weighti+1] = '\0';
 				foundWeight = true;				
 			}
 		}
 		pos++;
 	}
-	printf("weight %c %c %c", weight[0], weight[1], weight[2]);
+	//printf("weight %c %c %c", weight[0], weight[1], weight[2]);
 //	weight[lineNum] = atof(weightc);
-	printf("className %c %c %c", className[0], className[1], className[2]);
+	//printf("className %c %c %c", className[0], className[1], className[2]);
 	
 }
 
@@ -923,9 +926,9 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 	_fb.Clear();
 	const int maxBufSize = 1024;
 	char buf[maxBufSize];
-	const int n = 4;
+	const int n = 16;
 	char lineArr[n*maxBufSize];
-	int i = 0;
+	
 	string works;
 	string doesntwork, doesntworkfeature, doesntworkweight;
 	/*while (fgets(buf, 1024, fp)) {
@@ -947,6 +950,7 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 		doesntworkweight += w + '\n';
 	}*/
 	int pos = 0;
+	int i = 0;
 	while (fgets(buf, 1024, fp)) {
 		pos = i * 1024;
 		int j = 0;
@@ -973,7 +977,7 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 
 	// Copy host vectors to device
 	cudaMemcpy(device_lineArr, lineArr, bytes, cudaMemcpyHostToDevice);
-	sayHello<<<2,2>>>(device_lineArr, device_className, device_featureName, device_weight);
+	sayHello<<<4,4>>>(device_lineArr, device_className, device_featureName, device_weight);
 
 	//float * weights = (float*)malloc(n*sizeof(float));
 	char * weightc = (char*)malloc(n * 10 * sizeof(char));
@@ -985,12 +989,39 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 	cudaMemcpy(className, device_className, n * sizeof(char) * 10, cudaMemcpyDeviceToHost);
 	cudaMemcpy(featureName, device_featureName, n * sizeof(char) * 100, cudaMemcpyDeviceToHost);
 
+	
 
-//	cudaMalloc(&device_featureName, bytes);
-	// }
+	for (int i = 0; i < n; i++) {
+		char classNamesub[10]; int j = 0;
+		for (int c = i*10; c < (i+1)*10; c++) {
+			classNamesub[j] = className[c];
+			j++;
+		}
+		char featureNamesub[100];
+		j = 0;
+		for (int c = i * 100; c < (i + 1) * 100; c++) {
+			featureNamesub[j] = featureName[c];
+			j++;
+		}
+		char weightsub[10];
+		j = 0;
+		for (int c = i * 10; c < (i + 1) * 10; c++) {
+			weightsub[j] = weightc[c];
+			j++;
+		}
 
-	 // for zero-wight edges
-	/*_label_bag.Put(BOS_LABEL);
+		float lambda = atof(weightc);
+	
+		const int label = _label_bag.Put(string(classNamesub));
+
+		const int feature = _featurename_bag.Put(string(featureNamesub));
+		_fb.Put(ME_Feature(label, feature));
+		_vl.push_back(lambda);
+	}
+
+
+	//  for zero-wight edges
+	_label_bag.Put(BOS_LABEL);
 	_label_bag.Put(EOS_LABEL);
 	for (int i = 0; i < _label_bag.Size(); i++) {
 		for (int j = 0; j < _label_bag.Size(); j++) {
@@ -1047,7 +1078,7 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 
 	if (verbose) {
 		cerr << "...done" << endl;
-	}*/
+	}
 
 	return true;
 }
