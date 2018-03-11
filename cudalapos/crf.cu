@@ -20,7 +20,7 @@
 using namespace std;
 
 extern bool USE_EDGE_TRIGRAMS;
-const int tileNum = 4;
+const int tileNum = 32;
 
 
 const string BOS_LABEL = "!BOS!";
@@ -926,7 +926,7 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 	_fb.Clear();
 	const int maxBufSize = 1024;
 	char buf[maxBufSize];
-	const int n = 16;
+	const int n = 1024;
 	char lineArr[n*maxBufSize];
 	
 	string works;
@@ -977,7 +977,7 @@ CRF_Model::load_from_file(const string & filename, bool verbose)
 
 	// Copy host vectors to device
 	cudaMemcpy(device_lineArr, lineArr, bytes, cudaMemcpyHostToDevice);
-	sayHello<<<4,4>>>(device_lineArr, device_className, device_featureName, device_weight);
+	sayHello<<<32,32>>>(device_lineArr, device_className, device_featureName, device_weight);
 
 	//float * weights = (float*)malloc(n*sizeof(float));
 	char * weightc = (char*)malloc(n * 10 * sizeof(char));
