@@ -8,7 +8,7 @@
 #include <cmath>
 #include <cfloat>
 #include <map>
-
+#include <cuda.h>
 using namespace std;
 bool USE_EDGE_TRIGRAMS = false;
 
@@ -30,325 +30,417 @@ const static int HV_OFFSET = 3;
 
 void CRF_Model::lookahead_initialize_state_weights(const Sequence & seq)
 {
-  vector<double> powv(_num_classes);
-  for (size_t i = 0; i < seq.vs.size(); i++) {
-    powv.assign(_num_classes, 0.0);
-    const Sample & s = seq.vs[i];
-    for (vector<int>::const_iterator j = s.positive_features.begin(); j != s.positive_features.end(); j++){
-      for (vector<int>::const_iterator k = _feature2mef[*j].begin(); k != _feature2mef[*j].end(); k++) {
-	const double w = _vl[*k];
-	powv[_fb.Feature(*k).label()] += w;
-      }
-    }
+	vector<double> powv(_num_classes);
+	for (size_t i = 0; i < seq.vs.size(); i++) {
+		powv.assign(_num_classes, 0.0);
+		const Sample & s = seq.vs[i];
+		for (vector<int>::const_iterator j = s.positive_features.begin(); j != s.positive_features.end(); j++) {
+			for (vector<int>::const_iterator k = _feature2mef[*j].begin(); k != _feature2mef[*j].end(); k++) {
+				const double w = _vl[*k];
+				powv[_fb.Feature(*k).label()] += w;
+			}
+		}
 
-    for (int j = 0; j < _num_classes; j++) {
-      state_weight(i, j) = powv[j];
-    }
-  }
+		for (int j = 0; j < _num_classes; j++) {
+			state_weight(i, j) = powv[j];
+		}
+	}
 }
 
-double CRF_Model::lookahead_search(const Sequence & seq, 
-				   vector<int> & history,
-				   const int start,
-				   const int max_depth,   
-				   int depth, 
-				   double current_score,
-				   vector<int> & best_seq, 
-				   const bool follow_gold, 
-				   const vector<int> *forbidden_seq)
+__global__ void findWeight(double* _vl, int start, int seqSize, int* history,
+	int* device_edge_feature_id, double* device_weightstate, double* device_score)
 {
-  assert(history[HV_OFFSET + start - 1 + depth] >= 0);
-  assert(history[HV_OFFSET + start - 1] >= 0);
-  double m = -DBL_MAX;
-  double new_score = current_score;
-  //for loop goes in GPU
-  //GPU inputs
-  //  int *p_edge_feature_id;
-  //_vl
-  //_history
-  //seq.vs.size
-  //p_state_weight
-  //pass back array of weight at index i
+	int depth = 0;
+	int max_depth = 2;
+	int i = threadIdx.x;
+	int MAX_LABEL_TYPES = 50;
 
-  //int *p_edge_feature_id =cudaMalloc(&device_lineArr, bytes);
+	double new_score;
+	double current_score;
+	while (depth < max_depth && (start + depth < seqSize)) {
+
+		// edge unigram features (state bigrams)
+		int l = history[HV_OFFSET + start + depth - 1];
+		new_score += _vl[device_edge_feature_id[l * MAX_LABEL_TYPES + i]];
+
+		// edge bigram features (state trigrams)
+		if (depth + start > 0) {
+			int x = history[HV_OFFSET + start + depth - 2];
+			int y = history[HV_OFFSET + start + depth - 1];
+			int index = device_edge_feature_id[x * MAX_LABEL_TYPES * MAX_LABEL_TYPES + y * MAX_LABEL_TYPES + i];
+			new_score += _vl[index];
+
+		}
+		int x = start + depth;
+		// state + observation features
+		new_score += device_weightstate[x * MAX_LABEL_TYPES + i];
+
+		history[HV_OFFSET + start + depth] = i;
+		device_score[i] = new_score;
+		//if (new_score > current_score) {
+		//	current_score = new_score;
+
+		//	/*best_seq.clear();
+		//	best_seq.push_back(i);*/
+		//}
+		depth = depth + 1;
+	}
+}
 
 
+double CRF_Model::lookahead_search(const Sequence & seq,
+	vector<int> & history,
+	const int start,
+	const int max_depth,
+	int depth,
+	double current_score,
+	vector<int> & best_seq,
+	const bool follow_gold,
+	const vector<int> *forbidden_seq)
+{
+	assert(history[HV_OFFSET + start - 1 + depth] >= 0);
+	assert(history[HV_OFFSET + start - 1] >= 0);
+	
+	//for loop goes in GPU
+	//GPU inputs
+	//  int *p_edge_feature_id;
+	//_vl
+	//_history
+	//seq.vs.size
+	//p_state_weight
+	//pass back array of weight at index i
 
-  for (int i = 0; i < _num_classes; i++) {
-	  depth = 0;
-  while (depth < max_depth && (start + depth < (int)seq.vs.size())) {	 
+	
+	int size = seq.vs.size();
+	const int n = 36;
+	int *device_edge_feature_id;
+	cudaMalloc(&device_edge_feature_id, sizeof(int) * 57340);
 
-		  // edge unigram features (state bigrams)
-		  new_score += _vl[edge_feature_id(history[HV_OFFSET + start + depth - 1], i)];
+	double* device_vl;
+	cudaMalloc(&device_vl, sizeof(double)*n);
 
-		  // edge bigram features (state trigrams)
-		  if (depth + start > 0)
-			  new_score += _vl[edge_feature_id2(history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], i)];
+	double * device_weightstate;
+	cudaMalloc(&device_weightstate, sizeof(double) * MAX_LEN * MAX_LABEL_TYPES);
 
-		  // state + observation features
-		  new_score += state_weight(start + depth, i);
+	int* device_history;
+	cudaMalloc(&device_history, sizeof(int) * n);
 
-		  history[HV_OFFSET + start + depth] = i;
-		  if (new_score > m) {
-			  m = new_score;
-			  best_seq.clear();
-			  best_seq.push_back(i);
-		  }
-		  depth = depth + 1;
-	  }
-  }
-  return m;
-  }
+	double* device_score;
+	cudaMalloc(&device_score, sizeof(double) * size);
+
+	double* vlLocal= (double*)malloc( sizeof(double) * _vl.size());
+	int* histLocal=(int*) malloc(sizeof(int) * history.size());
+
+	for (int i = 0; i < _vl.size(); i++) {
+		vlLocal[i] = _vl[i];
+		
+	}
+
+	for (int i = 0; i < history.size(); i++) {
+		histLocal[i] = history[i];
+	}
+
+	double scores[n];
+
+
+	//memcpy
+	cudaMemcpy(device_edge_feature_id, p_edge_feature_id, sizeof(int) * 57340, cudaMemcpyHostToDevice);
+	cudaMemcpy(device_vl, vlLocal, sizeof(double)*n, cudaMemcpyHostToDevice);
+	cudaMemcpy(device_weightstate, p_state_weight, sizeof(double) * MAX_LEN * MAX_LABEL_TYPES, cudaMemcpyHostToDevice);
+	cudaMemcpy(device_history, histLocal, sizeof(int) * n, cudaMemcpyHostToDevice);
+
+
+	findWeight << <1, size >> > (device_vl, start, size, device_history, device_edge_feature_id, device_weightstate, device_score);
+
+	cudaMemcpy(scores, device_score, n * sizeof(int), cudaMemcpyDeviceToHost);
+
+	double currentScore = -DBL_MAX;
+	
+	for (int i = 0; i < n; i++) {
+		double new_score = scores[i];
+		if (new_score > currentScore) {
+			currentScore = new_score;
+			best_seq.clear();
+			best_seq.push_back(i);
+		}
+	}
+
+	//for (int i = 0; i < _num_classes; i++) {
+	   // depth = 0;
+	//while (depth < max_depth && (start + depth < (int)seq.vs.size())) {	 
+
+		  //  // edge unigram features (state bigrams)
+		  //  new_score += _vl[edge_feature_id(history[HV_OFFSET + start + depth - 1], i)];
+
+		  //  // edge bigram features (state trigrams)
+		  //  if (depth + start > 0)
+		  //	  new_score += _vl[edge_feature_id2(history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], i)];
+
+		  //  // state + observation features
+		  //  new_score += state_weight(start + depth, i);
+
+		  //  history[HV_OFFSET + start + depth] = i;
+		  //  if (new_score > m) {
+		  //	  m = new_score;
+		  //	  best_seq.clear();
+		  //	  best_seq.push_back(i);
+		  //  }
+		  //  depth = depth + 1;
+	   // }
+	//}
+	//return m;
+	return currentScore;
+}
 
 
 
 void CRF_Model::calc_diff(const double val,
-			  const Sequence & seq, 
-			  const int start, 
-			  const vector<int> & history, 
-			  const int depth, const int max_depth, 
-			  map<int, double> & diff)
+	const Sequence & seq,
+	const int start,
+	const vector<int> & history,
+	const int depth, const int max_depth,
+	map<int, double> & diff)
 {
-  if (start + depth == (int)seq.vs.size()) return;
-  //  if (depth >= LOOKAHEAD_DEPTH) return;
-  if (depth >= max_depth) return;
+	if (start + depth == (int)seq.vs.size()) return;
+	//  if (depth >= LOOKAHEAD_DEPTH) return;
+	if (depth >= max_depth) return;
 
-  const int label = history[HV_OFFSET + start + depth];
+	const int label = history[HV_OFFSET + start + depth];
 
-  int eid = -1;
-  eid = edge_feature_id(history[HV_OFFSET + start + depth -  1], label);
-  assert(eid >= 0);
-  diff[eid] += val;
+	int eid = -1;
+	eid = edge_feature_id(history[HV_OFFSET + start + depth - 1], label);
+	assert(eid >= 0);
+	diff[eid] += val;
 
-  int eid2 = -1;
-  eid2 = edge_feature_id2(history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], label);
-  //  assert(eid2 >= 0);
-  if (eid2 >= 0) diff[eid2] += val;
+	int eid2 = -1;
+	eid2 = edge_feature_id2(history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], label);
+	//  assert(eid2 >= 0);
+	if (eid2 >= 0) diff[eid2] += val;
 
-  if (USE_EDGE_TRIGRAMS) {
-    const int eid3 = edge_feature_id3(history[HV_OFFSET + start + depth - 3], history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], label);
-    if (eid3 >= 0) diff[eid3] += val;
-  }
+	if (USE_EDGE_TRIGRAMS) {
+		const int eid3 = edge_feature_id3(history[HV_OFFSET + start + depth - 3], history[HV_OFFSET + start + depth - 2], history[HV_OFFSET + start + depth - 1], label);
+		if (eid3 >= 0) diff[eid3] += val;
+	}
 
-  assert(start + depth < (int)seq.vs.size());
-  const Sample & s = seq.vs[start + depth];
-  for (vector<int>::const_iterator j = s.positive_features.begin(); j != s.positive_features.end(); j++){
-    for (vector<int>::const_iterator k = _feature2mef[*j].begin(); k != _feature2mef[*j].end(); k++) {
-      if (_fb.Feature(*k).label() == label)
-	diff[*k] += val;
-    }
-  }
+	assert(start + depth < (int)seq.vs.size());
+	const Sample & s = seq.vs[start + depth];
+	for (vector<int>::const_iterator j = s.positive_features.begin(); j != s.positive_features.end(); j++) {
+		for (vector<int>::const_iterator k = _feature2mef[*j].begin(); k != _feature2mef[*j].end(); k++) {
+			if (_fb.Feature(*k).label() == label)
+				diff[*k] += val;
+		}
+	}
 
-  calc_diff(val, seq, start, history, depth + 1, max_depth, diff);
+	calc_diff(val, seq, start, history, depth + 1, max_depth, diff);
 }
 
 static void print_bestsq(const vector<int> & bestsq)
 {
-  for (vector<int>::const_iterator i = bestsq.begin(); i != bestsq.end(); i++) {
-    cout << *i << " ";
-  }
-  cout << endl;
+	for (vector<int>::const_iterator i = bestsq.begin(); i != bestsq.end(); i++) {
+		cout << *i << " ";
+	}
+	cout << endl;
 
 }
 
-int CRF_Model::update_weights_sub2(const Sequence & seq, 
-				   vector<int> & history, 
-				   const int x,
-				   map<int, double> & diff) 
+int CRF_Model::update_weights_sub2(const Sequence & seq,
+	vector<int> & history,
+	const int x,
+	map<int, double> & diff)
 {
-  // gold-standard sequence
-  vector<int> gold_seq;
-  const double gold_score = lookahead_search(seq, history, x, LOOKAHEAD_DEPTH, 0, 0, gold_seq, true);
+	// gold-standard sequence
+	vector<int> gold_seq;
+	const double gold_score = lookahead_search(seq, history, x, LOOKAHEAD_DEPTH, 0, 0, gold_seq, true);
 
-  //    cout << "gold = " << gold << " score = " << gold_score << endl;
-  //        print_bestsq(gold_seq);
+	//    cout << "gold = " << gold << " score = " << gold_score << endl;
+	//        print_bestsq(gold_seq);
 
-  vector<int> best_seq;
-  const double score = lookahead_search(seq, history, x, LOOKAHEAD_DEPTH, 0, 0, best_seq, false, &gold_seq);
+	vector<int> best_seq;
+	const double score = lookahead_search(seq, history, x, LOOKAHEAD_DEPTH, 0, 0, best_seq, false, &gold_seq);
 
-  //       print_bestsq(best_seq);
+	//       print_bestsq(best_seq);
 
-  //  if (best_seq == gold_seq) return 0;
-  if (best_seq.front() == gold_seq.front()) return 0;
+	//  if (best_seq == gold_seq) return 0;
+	if (best_seq.front() == gold_seq.front()) return 0;
 
-  map<int, double> vdiff;
+	map<int, double> vdiff;
 
-  copy(gold_seq.begin(), gold_seq.end(), history.begin() + HV_OFFSET + x);
-  calc_diff( 1, seq, x, history, 0, LOOKAHEAD_DEPTH, vdiff);
-  copy(best_seq.begin(), best_seq.end(), history.begin() + HV_OFFSET + x);
-  calc_diff(-1, seq, x, history, 0, LOOKAHEAD_DEPTH, vdiff);
+	copy(gold_seq.begin(), gold_seq.end(), history.begin() + HV_OFFSET + x);
+	calc_diff(1, seq, x, history, 0, LOOKAHEAD_DEPTH, vdiff);
+	copy(best_seq.begin(), best_seq.end(), history.begin() + HV_OFFSET + x);
+	calc_diff(-1, seq, x, history, 0, LOOKAHEAD_DEPTH, vdiff);
 
 
-  for (map<int, double>::const_iterator j = vdiff.begin(); j != vdiff.end(); j++) {
-    diff[j->first] += j->second;
-  }
+	for (map<int, double>::const_iterator j = vdiff.begin(); j != vdiff.end(); j++) {
+		diff[j->first] += j->second;
+	}
 
-  return 1;
+	return 1;
 }
 
 
 int CRF_Model::lookaheadtrain_sentence(const Sequence & seq, int & t, vector<double> & wa)
 {
-  //    lookahead_initialize_edge_weights();  // to be removed
-  lookahead_initialize_state_weights(seq);
+	//    lookahead_initialize_edge_weights();  // to be removed
+	lookahead_initialize_state_weights(seq);
 
-  const int len = seq.vs.size();
+	const int len = seq.vs.size();
 
-  vector<int> history(len + HV_OFFSET, -1);
-  fill(history.begin(), history.begin() + HV_OFFSET, _num_classes); // BOS
-  int error_num = 0;
-  for (int x = 0; x < len; x++) {
+	vector<int> history(len + HV_OFFSET, -1);
+	fill(history.begin(), history.begin() + HV_OFFSET, _num_classes); // BOS
+	int error_num = 0;
+	for (int x = 0; x < len; x++) {
 
-    map<int, double> diff;
+		map<int, double> diff;
 
-    error_num += update_weights_sub2(seq, history, x, diff);
-    history[HV_OFFSET + x] = seq.vs[x].label;
+		error_num += update_weights_sub2(seq, history, x, diff);
+		history[HV_OFFSET + x] = seq.vs[x].label;
 
-    for (map<int, double>::const_iterator i = diff.begin(); i != diff.end(); i++) {
-      //	    cout << "(" << i->first << ", " << i->second << ") ";
-      const double v = 1.0 * i->second;
-      _vl[i->first] += v;
-      wa[i->first] += t * v;
-    }
-    t++;
+		for (map<int, double>::const_iterator i = diff.begin(); i != diff.end(); i++) {
+			//	    cout << "(" << i->first << ", " << i->second << ") ";
+			const double v = 1.0 * i->second;
+			_vl[i->first] += v;
+			wa[i->first] += t * v;
+		}
+		t++;
 
-  }
+	}
 
-  return error_num;
+	return error_num;
 }
 
 double
 CRF_Model::heldout_lookahead_error()
 {
-  int nerrors = 0, total_len = 0;
+	int nerrors = 0, total_len = 0;
 
-  //    lookahead_initialize_edge_weights();  // to be removed
-  for (std::vector<Sequence>::const_iterator i = _heldout.begin(); i != _heldout.end(); i++) {
-    total_len += i->vs.size();
+	//    lookahead_initialize_edge_weights();  // to be removed
+	for (std::vector<Sequence>::const_iterator i = _heldout.begin(); i != _heldout.end(); i++) {
+		total_len += i->vs.size();
 
-    vector<int> vs(i->vs.size());
-    decode_lookahead_sentence(*i, vs);
+		vector<int> vs(i->vs.size());
+		decode_lookahead_sentence(*i, vs);
 
-    for (size_t j = 0; j < vs.size(); j++) {
-      if (vs[j] != i->vs[j].label) nerrors++;
-    }
+		for (size_t j = 0; j < vs.size(); j++) {
+			if (vs[j] != i->vs[j].label) nerrors++;
+		}
 
-  }
-  _heldout_error = (double)nerrors / total_len;
+	}
+	_heldout_error = (double)nerrors / total_len;
 
-  return 0;
+	return 0;
 }
 
 
 int
 CRF_Model::perform_LookaheadTraining()
 {
-  cerr << "lookahead depth = " << LOOKAHEAD_DEPTH << endl;
-  cerr << "perceptron margin = " << PERCEPTRON_MARGIN << endl;
-  cerr << "perceptron niter = " << PERCEPTRON_NITER << endl;
+	cerr << "lookahead depth = " << LOOKAHEAD_DEPTH << endl;
+	cerr << "perceptron margin = " << PERCEPTRON_MARGIN << endl;
+	cerr << "perceptron niter = " << PERCEPTRON_NITER << endl;
 
-  const int dim = _fb.Size();
+	const int dim = _fb.Size();
 
-  vector<double> wa(dim, 0);
+	vector<double> wa(dim, 0);
 
-  int t = 1;
+	int t = 1;
 
-  //    vector<int> r(_vs.size());
-  //    for (int i = 0; i < (int)_vs.size(); i++) r[i] = i;
-  //    random_shuffle(r.begin(), r.end());
+	//    vector<int> r(_vs.size());
+	//    for (int i = 0; i < (int)_vs.size(); i++) r[i] = i;
+	//    random_shuffle(r.begin(), r.end());
 
-  int iter = 0;
-  while (iter < PERCEPTRON_NITER) {
+	int iter = 0;
+	while (iter < PERCEPTRON_NITER) {
 
-    iter++;
+		iter++;
 
-    vector<int> r(_vs.size());
-    for (int i = 0; i < (int)_vs.size(); i++) r[i] = i;
-    random_shuffle(r.begin(), r.end());
+		vector<int> r(_vs.size());
+		for (int i = 0; i < (int)_vs.size(); i++) r[i] = i;
+		random_shuffle(r.begin(), r.end());
 
-    int error_num = 0;
-    //    int rest = _vs.size();
-    for (int i = 0; i < (int)_vs.size(); i++) {
-      const Sequence & seq = _vs[r[i]];
+		int error_num = 0;
+		//    int rest = _vs.size();
+		for (int i = 0; i < (int)_vs.size(); i++) {
+			const Sequence & seq = _vs[r[i]];
 
-      error_num += lookaheadtrain_sentence(seq, t, wa);
+			error_num += lookaheadtrain_sentence(seq, t, wa);
 
-      /*
-      for (map<int, double>::const_iterator i = diff.begin(); i != diff.end(); i++) {
-	//	    cout << "(" << i->first << ", " << i->second << ") ";
-	const double v = 1.0 * i->second;
-	_vl[i->first] += v;
-	wa[i->first] += t * v;
-      }
-      */
-    }
-    //    cout << endl;
-    cerr << "iter = " << iter << " num_errors = " << error_num;
-    
-    if (_heldout.size() > 0) {
-      vector<double> tmpvl = _vl;
-      for (int i = 0; i < dim; i++) _vl[i] -= wa[i] / t;
-      heldout_lookahead_error();
-      cerr << "\theldout_error = " << _heldout_error;
-      _vl = tmpvl;
-    }
-    cerr << endl;
+			/*
+			for (map<int, double>::const_iterator i = diff.begin(); i != diff.end(); i++) {
+		  //	    cout << "(" << i->first << ", " << i->second << ") ";
+		  const double v = 1.0 * i->second;
+		  _vl[i->first] += v;
+		  wa[i->first] += t * v;
+			}
+			*/
+		}
+		//    cout << endl;
+		cerr << "iter = " << iter << " num_errors = " << error_num;
 
-    if (error_num == 0) break;
-  }
+		if (_heldout.size() > 0) {
+			vector<double> tmpvl = _vl;
+			for (int i = 0; i < dim; i++) _vl[i] -= wa[i] / t;
+			heldout_lookahead_error();
+			cerr << "\theldout_error = " << _heldout_error;
+			_vl = tmpvl;
+		}
+		cerr << endl;
 
-  for (int i = 0; i < dim; i++) _vl[i] -= wa[i] / t;
+		if (error_num == 0) break;
+	}
+
+	for (int i = 0; i < dim; i++) _vl[i] -= wa[i] / t;
 
 
-  return 0;
+	return 0;
 }
 
 
 int CRF_Model::decode_lookahead_sentence(const Sequence & seq, vector<int> & vs)
 {
-  //    lookahead_initialize_edge_weights();  // to be removed
-  lookahead_initialize_state_weights(seq);
+	//    lookahead_initialize_edge_weights();  // to be removed
+	lookahead_initialize_state_weights(seq);
 
-  const int len = seq.vs.size();
+	const int len = seq.vs.size();
 
-  vector<int> history(len + HV_OFFSET, -1);
-  fill(history.begin(), history.begin() + HV_OFFSET, _num_classes); // BOS
-  int error_num = 0;
-  for (int x = 0; x < len; x++) {
+	vector<int> history(len + HV_OFFSET, -1);
+	fill(history.begin(), history.begin() + HV_OFFSET, _num_classes); // BOS
+	int error_num = 0;
+	for (int x = 0; x < len; x++) {
 
-    vector<int> bestsq;
-    const double score = lookahead_search(seq, history, x, LOOKAHEAD_DEPTH, 0, 0, bestsq);
+		vector<int> bestsq;
+		const double score = lookahead_search(seq, history, x, LOOKAHEAD_DEPTH, 0, 0, bestsq);
 
-    vs[x] = bestsq.front();
-    history[HV_OFFSET + x] = vs[x];
-  }
+		vs[x] = bestsq.front();
+		history[HV_OFFSET + x] = vs[x];
+	}
 
-  return error_num;
+	return error_num;
 }
 
 
 void CRF_Model::decode_lookahead(CRF_Sequence & s0)
 {
-  if (s0.vs.size() >= MAX_LEN) {
-    cerr << "error: sequence is too long." << endl;
-    return;
-  }
+	if (s0.vs.size() >= MAX_LEN) {
+		cerr << "error: sequence is too long." << endl;
+		return;
+	}
 
-  Sequence seq;
+	Sequence seq;
 
-  for (vector<CRF_State>::const_iterator i = s0.vs.begin(); i != s0.vs.end(); i++) {
-    Sample s;
-    for (vector<string>::const_iterator j = i->features.begin(); j != i->features.end(); j++) {
-      const int id = _featurename_bag.Id(*j);
-      if (id >= 0) s.positive_features.push_back(id);
-    }
-    seq.vs.push_back(s);
-  }
-  
-  vector<int> vs(seq.vs.size());
-  decode_lookahead_sentence(seq, vs);
+	for (vector<CRF_State>::const_iterator i = s0.vs.begin(); i != s0.vs.end(); i++) {
+		Sample s;
+		for (vector<string>::const_iterator j = i->features.begin(); j != i->features.end(); j++) {
+			const int id = _featurename_bag.Id(*j);
+			if (id >= 0) s.positive_features.push_back(id);
+		}
+		seq.vs.push_back(s);
+	}
 
-  for (size_t i = 0; i < seq.vs.size(); i++) {
-    s0.vs[i].label = _label_bag.Str(vs[i]);
-  }
+	vector<int> vs(seq.vs.size());
+	decode_lookahead_sentence(seq, vs);
+
+	for (size_t i = 0; i < seq.vs.size(); i++) {
+		s0.vs[i].label = _label_bag.Str(vs[i]);
+	}
 }
